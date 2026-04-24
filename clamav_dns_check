@@ -1,0 +1,46 @@
+#!/bin/bash
+
+DNS_HOST="current.cvd.clamav.net"
+
+# Lokale DB sicher holen
+LOCAL_FILE="/var/lib/clamav/daily.cvd"
+
+if [ ! -f "$LOCAL_FILE" ]; then
+  echo "2 ClamAV_Check_Definition_against_DNS - lokale DB fehlt"
+  exit 0
+fi
+
+LOCAL_TS=$(stat -c %Y "$LOCAL_FILE")
+
+# DNS abfragen
+REMOTE_RAW=$(dig +short $DNS_HOST TXT | tr -d '"')
+
+if [ -z "$REMOTE_RAW" ]; then
+  echo "2 ClamAV_Check_Definition_against_DNS - DNS Fehler"
+  exit 0
+fi
+
+# korrekt: 3. Feld ist Timestamp
+REMOTE_TS=$(echo "$REMOTE_RAW" | cut -d: -f3)
+
+# harte Validierung
+if ! [[ "$REMOTE_TS" =~ ^[0-9]+$ ]]; then
+  echo "2 ClamAV_Check_Definition_against_DNS - ungültige DNS Antwort"
+  exit 0
+fi
+
+# nur positive Differenz zulassen
+if [ "$REMOTE_TS" -lt "$LOCAL_TS" ]; then
+  echo "0 ClamAV_Check_Definition_against_DNS - lokale DB neuer als upstream?"
+  exit 0
+fi
+
+AGE_H=$(( (REMOTE_TS - LOCAL_TS) / 3600 ))
+
+if [ "$AGE_H" -gt 48 ]; then
+  echo "2 ClamAV_Check_Definition_against_DNS age=${AGE_H}h - stark veraltet"
+elif [ "$AGE_H" -gt 24 ]; then
+  echo "1 ClamAV_Check_Definition_against_DNS age=${AGE_H}h - veraltet"
+else
+  echo "0 ClamAV_Check_Definition_against_DNS age=${AGE_H}h - OK"
+fi
